@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const Announcement = require('../models/announcement.model');
-const User = require('../models/user.model');
-const Batch = require('../models/batch.model');
+const User = require('../models/User');
+const Batch = require('../models/batch');
 const mongoose = require('mongoose');
 
 // GET announcements for enrolled student only
