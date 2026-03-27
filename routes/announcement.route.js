@@ -1,6 +1,37 @@
 const express = require('express');
 const router = express.Router();
 const Announcement = require('../models/announcement.model');
+const User = require('../models/user.model');
+const Batch = require('../models/batch.model');
+const mongoose = require('mongoose');
+
+// GET announcements for enrolled student only
+router.get('/student/:userId', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.userId)
+                           .populate('enrolled_batches');
+
+    if (!user || user.enrolled_batches.length === 0) {
+      return res.status(200).json([]); // not enrolled → empty
+    }
+
+    const batch    = user.enrolled_batches[0];
+    const studioId = batch.studioId;
+    const batchId  = batch._id;
+
+    // Call DanceCount API
+    const response = await fetch(
+      `http://147.93.19.17:5000/announcements/student/${studioId}/${batchId}`
+    );
+    const announcements = await response.json();
+
+    res.status(200).json(announcements);
+
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch announcements', error });
+  }
+});
+
 
 // GET all announcements
 router.get('/', async (req, res) => {
