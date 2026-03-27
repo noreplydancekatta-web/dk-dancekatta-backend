@@ -1,8 +1,10 @@
 const mongoose = require('mongoose');
 
 const AnnouncementSchema = new mongoose.Schema({
-  title: { type: String, required: true },
-  message: { type: String, required: true },
+  title:     { type: String, required: true },
+  message:   { type: String, required: true },
+  studioId:  { type: String, required: true }, // ✅ ADD
+  batchId:   { type: String, default: null },  // ✅ ADD
   createdAt: { type: Date, default: Date.now }
 });
 

@@ -55,6 +55,7 @@ router.get('/', async (req, res) => {
 
 // ✅ POST a new announcement
 router.post('/', async (req, res) => {
+   console.log('📥 POST /announcements body:', req.body); // ✅ debug log
   try {
     const { title, message, createdAt } = req.body;
 
@@ -65,6 +66,8 @@ router.post('/', async (req, res) => {
     const newAnnouncement = new Announcement({
       title,
       message,
+      studioId,                        // ✅ ADD
+      batchId: batchId || null,        // ✅ ADD
       createdAt: createdAt || new Date()
     });
 
