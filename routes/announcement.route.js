@@ -1,7 +1,6 @@
 const express = require('express');
 const router = express.Router();
 const Announcement = require('../models/announcement.model');
-const User = require('../models/User');
 const mongoose = require('mongoose');
 
 // ─────────────────────────────────────────────
@@ -9,35 +8,56 @@ const mongoose = require('mongoose');
 // ─────────────────────────────────────────────
 router.get('/student/:userId', async (req, res) => {
   try {
-    const user = await User.findById(req.params.userId)
-                           .populate('enrolled_batches');
+    const Transaction = mongoose.model('Transaction');
+    const Batch = mongoose.model('Batch');
 
-    if (!user || !user.enrolled_batches || user.enrolled_batches.length === 0) {
+    // Step 1: Get all transactions for this student
+    const transactions = await Transaction.find({
+      studentId: req.params.userId,
+    });
+
+    console.log(`📦 Transactions found: ${transactions.length}`);
+
+    if (!transactions || transactions.length === 0) {
       return res.status(200).json([]);
     }
 
-    // ✅ FIX: Collect ALL studioIds and batchIds from ALL enrolled batches
-    const studioIds = [...new Set(
-      user.enrolled_batches
-        .map(b => b.studioId)
-        .filter(Boolean)
+    // Step 2: Get all batchIds from transactions
+    const batchIds = [...new Set(
+      transactions.map(t => t.batchId?.toString()).filter(Boolean)
     )];
 
-    const batchIds = user.enrolled_batches
-      .map(b => b._id)
-      .filter(Boolean);
+    console.log('✅ batchIds:', batchIds);
 
-    // ✅ FIX: Query local Announcement collection directly
-    // Match announcements that belong to any of the user's studios,
-    // and either have no batchId (studio-wide) or match one of the user's batches
+    // Step 3: Look up those batches to get their studioIds
+    const batches = await Batch.find({ _id: { $in: batchIds } });
+
+    console.log(`📦 Batches found: ${batches.length}`);
+
+    // ✅ Convert ObjectId to plain string to match Announcement.studioId (String type)
+    const studioIds = [...new Set(
+      batches.map(b => b.studioId?.toString()).filter(Boolean)
+    )];
+
+    console.log('✅ studioIds (as strings):', studioIds);
+
+    if (studioIds.length === 0) {
+      return res.status(200).json([]);
+    }
+
+    // Step 4: Fetch announcements
+    // Both studioId and batchId in Announcement are Strings, so direct $in match works
     const announcements = await Announcement.find({
       studioId: { $in: studioIds },
       $or: [
         { batchId: null },
         { batchId: { $exists: false } },
+        { batchId: '' },
         { batchId: { $in: batchIds } },
       ],
     }).sort({ createdAt: -1 });
+
+    console.log(`📢 Found ${announcements.length} announcements for userId: ${req.params.userId}`);
 
     const safeAnnouncements = announcements.map(a => ({
       _id:       a._id,
@@ -104,8 +124,9 @@ router.post('/', async (req, res) => {
     const newAnnouncement = new Announcement({
       title,
       message,
-      studioId,
-      batchId: batchId || null,
+      // ✅ Always store as plain string to stay consistent with query
+      studioId: studioId.toString(),
+      batchId: batchId ? batchId.toString() : null,
       createdAt: createdAt || new Date(),
     });
 
