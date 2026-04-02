@@ -16,21 +16,39 @@ router.get('/student/:userId', async (req, res) => {
       return res.status(200).json([]);
     }
 
-    const batch    = user.enrolled_batches[0];
-    const studioId = batch.studioId;
-    const batchId  = batch._id;
+    // ✅ FIX: Collect ALL studioIds and batchIds from ALL enrolled batches
+    const studioIds = [...new Set(
+      user.enrolled_batches
+        .map(b => b.studioId)
+        .filter(Boolean)
+    )];
 
-    // ✅ FIX: port changed from 5000 → 4000 (DanceCount's correct port)
-    const response = await fetch(
-      `http://147.93.19.17:4000/announcements/student/${studioId}/${batchId}`
-    );
+    const batchIds = user.enrolled_batches
+      .map(b => b._id)
+      .filter(Boolean);
 
-    if (!response.ok) {
-      throw new Error(`DanceCount API error: ${response.status}`);
-    }
+    // ✅ FIX: Query local Announcement collection directly
+    // Match announcements that belong to any of the user's studios,
+    // and either have no batchId (studio-wide) or match one of the user's batches
+    const announcements = await Announcement.find({
+      studioId: { $in: studioIds },
+      $or: [
+        { batchId: null },
+        { batchId: { $exists: false } },
+        { batchId: { $in: batchIds } },
+      ],
+    }).sort({ createdAt: -1 });
 
-    const announcements = await response.json();
-    res.status(200).json(announcements);
+    const safeAnnouncements = announcements.map(a => ({
+      _id:       a._id,
+      title:     a.title   || 'No Title',
+      message:   a.message || 'No Message',
+      studioId:  a.studioId,
+      batchId:   a.batchId,
+      createdAt: a.createdAt,
+    }));
+
+    res.status(200).json(safeAnnouncements);
 
   } catch (error) {
     console.error('❌ Error fetching student announcements:', error);
@@ -73,7 +91,6 @@ router.post('/', async (req, res) => {
   console.log('📥 POST /announcements body:', req.body);
 
   try {
-    // ✅ FIX: studioId and batchId now properly destructured
     const { title, message, studioId, batchId, createdAt } = req.body;
 
     if (!title || !message) {
