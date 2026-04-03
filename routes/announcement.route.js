@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const Announcement = require('../models/announcement.model');
+const User = require('../models/User');
 const mongoose = require('mongoose');
 
 // ─────────────────────────────────────────────
@@ -8,67 +9,41 @@ const mongoose = require('mongoose');
 // ─────────────────────────────────────────────
 router.get('/student/:userId', async (req, res) => {
   try {
-    const Transaction = mongoose.model('Transaction');
-    const Batch = mongoose.model('Batch');
+    const user = await User.findById(req.params.userId)
+                           .populate('enrolled_batches');
 
-    // Step 1: Get all transactions for this student
-    const transactions = await Transaction.find({
-      studentId: req.params.userId,
+    if (!user || !user.enrolled_batches || user.enrolled_batches.length === 0) {
+      return res.status(200).json([]);
+    }
+
+    // ✅ FIX: Fetch announcements for ALL enrolled batches in parallel
+    const results = await Promise.allSettled(
+      user.enrolled_batches.map(batch =>
+        fetch(`http://147.93.19.17:4000/announcements/student/${batch.studioId}/${batch._id}`)
+          .then(r => {
+            if (!r.ok) throw new Error(`DanceCount API error: ${r.status}`);
+            return r.json();
+          })
+      )
+    );
+
+    // ✅ Collect successful results, skip failed ones
+    const allAnnouncements = results
+      .filter(r => r.status === 'fulfilled')
+      .flatMap(r => r.value);
+
+    // ✅ Deduplicate by _id
+    const seen = new Set();
+    const unique = allAnnouncements.filter(a => {
+      if (seen.has(a._id)) return false;
+      seen.add(a._id);
+      return true;
     });
 
-    console.log(`📦 Transactions found: ${transactions.length}`);
+    // ✅ Sort by newest first
+    unique.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    if (!transactions || transactions.length === 0) {
-      return res.status(200).json([]);
-    }
-
-    // Step 2: Get all batchIds from transactions
-    const batchIds = [...new Set(
-      transactions.map(t => t.batchId?.toString()).filter(Boolean)
-    )];
-
-    console.log('✅ batchIds:', batchIds);
-
-    // Step 3: Look up those batches to get their studioIds
-    const batches = await Batch.find({ _id: { $in: batchIds } });
-
-    console.log(`📦 Batches found: ${batches.length}`);
-
-    // ✅ Convert ObjectId to plain string to match Announcement.studioId (String type)
-    const studioIds = [...new Set(
-      batches.map(b => b.studioId?.toString()).filter(Boolean)
-    )];
-
-    console.log('✅ studioIds (as strings):', studioIds);
-
-    if (studioIds.length === 0) {
-      return res.status(200).json([]);
-    }
-
-    // Step 4: Fetch announcements
-    // Both studioId and batchId in Announcement are Strings, so direct $in match works
-    const announcements = await Announcement.find({
-      studioId: { $in: studioIds },
-      $or: [
-        { batchId: null },
-        { batchId: { $exists: false } },
-        { batchId: '' },
-        { batchId: { $in: batchIds } },
-      ],
-    }).sort({ createdAt: -1 });
-
-    console.log(`📢 Found ${announcements.length} announcements for userId: ${req.params.userId}`);
-
-    const safeAnnouncements = announcements.map(a => ({
-      _id:       a._id,
-      title:     a.title   || 'No Title',
-      message:   a.message || 'No Message',
-      studioId:  a.studioId,
-      batchId:   a.batchId,
-      createdAt: a.createdAt,
-    }));
-
-    res.status(200).json(safeAnnouncements);
+    res.status(200).json(unique);
 
   } catch (error) {
     console.error('❌ Error fetching student announcements:', error);
@@ -124,13 +99,40 @@ router.post('/', async (req, res) => {
     const newAnnouncement = new Announcement({
       title,
       message,
-      // ✅ Always store as plain string to stay consistent with query
-      studioId: studioId.toString(),
-      batchId: batchId ? batchId.toString() : null,
+      studioId,
+      batchId: batchId || null,
       createdAt: createdAt || new Date(),
     });
 
     const saved = await newAnnouncement.save();
+
+    // ✅ Forward the new announcement to DanceCount API
+    // so students enrolled in this batch receive it
+    try {
+      const dcResponse = await fetch(
+        `http://147.93.19.17:4000/announcements`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            message,
+            studioId,
+            batchId: batchId || null,
+            createdAt: saved.createdAt,
+          }),
+        }
+      );
+
+      if (!dcResponse.ok) {
+        console.warn(`⚠️ DanceCount sync warning: ${dcResponse.status}`);
+      } else {
+        console.log('✅ Announcement synced to DanceCount API');
+      }
+    } catch (syncError) {
+      // Don't fail the whole request if sync fails
+      console.warn('⚠️ Could not sync to DanceCount API:', syncError.message);
+    }
 
     res.status(201).json({
       success: true,
