@@ -2,10 +2,13 @@ const express = require('express');
 const router = express.Router();
 const Announcement = require('../models/announcement.model');
 const User = require('../models/User');
+const Transaction = require('../models/transaction'); // ✅ matches your actual file: transaction.js
 const mongoose = require('mongoose');
 
 // ─────────────────────────────────────────────
 // GET announcements for enrolled student only
+// KEY FIX: only return announcements created AFTER the student enrolled
+//          in that specific batch, so pre-enrollment messages are hidden.
 // ─────────────────────────────────────────────
 router.get('/student/:userId', async (req, res) => {
   try {
@@ -16,31 +19,71 @@ router.get('/student/:userId', async (req, res) => {
       return res.status(200).json([]);
     }
 
-    // ✅ FIX: Fetch announcements for ALL enrolled batches in parallel
+    // ✅ Fetch the transaction records for this user so we know WHEN they
+    //    enrolled in each batch.
+    //    Schema uses: studentId, transactionDate, and timestamps:true (createdAt)
+    const transactions = await Transaction.find({
+      studentId: req.params.userId,   // ← correct field name from schema
+    }).lean();
+
+    // Build a map: batchId (string) → enrolledAt (Date)
+    // If no transaction found for a batch, fall back to epoch (show nothing old)
+    const enrolledAtMap = {};
+    for (const txn of transactions) {
+      const batchId = txn.batchId?.toString();
+      if (batchId) {
+        // transactionDate is the explicit enrollment date field;
+        // createdAt is the auto-timestamp fallback (both exist due to timestamps:true)
+        const existing = enrolledAtMap[batchId];
+        const txnDate = new Date(txn.transactionDate || txn.createdAt || 0);
+        if (!existing || txnDate < existing) {
+          enrolledAtMap[batchId] = txnDate;
+        }
+      }
+    }
+
+    // ✅ For each enrolled batch, fetch only announcements created ON OR AFTER
+    //    the enrollment date, filtering old pre-enrollment messages out.
     const results = await Promise.allSettled(
-      user.enrolled_batches.map(batch =>
-        fetch(`http://147.93.19.17:4000/announcements/student/${batch.studioId}/${batch._id}`)
-          .then(r => {
-            if (!r.ok) throw new Error(`DanceCount API error: ${r.status}`);
-            return r.json();
-          })
-      )
+      user.enrolled_batches.map(async (batch) => {
+        const batchId = batch._id.toString();
+        const enrolledAt = enrolledAtMap[batchId] || new Date(0); // epoch fallback
+
+        // Query directly from DB (same server) instead of an internal HTTP call
+        const announcements = await Announcement.find({
+          batchId: batchId,
+          studioId: batch.studioId?.toString(),
+          createdAt: { $gte: enrolledAt }, // ✅ THE CORE FIX
+        })
+          .sort({ createdAt: -1 })
+          .lean();
+
+        return announcements.map(a => ({
+          _id:       a._id,
+          title:     a.title   || 'No Title',
+          message:   a.message || 'No Message',
+          studioId:  a.studioId,
+          batchId:   a.batchId,
+          createdAt: a.createdAt,
+        }));
+      })
     );
 
-    // ✅ Collect successful results, skip failed ones
+    // Collect successful results, skip failed ones
     const allAnnouncements = results
       .filter(r => r.status === 'fulfilled')
       .flatMap(r => r.value);
 
-    // ✅ Deduplicate by _id
+    // Deduplicate by _id (in case a general announcement targets multiple batches)
     const seen = new Set();
     const unique = allAnnouncements.filter(a => {
-      if (seen.has(a._id)) return false;
-      seen.add(a._id);
+      const key = a._id.toString();
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
 
-    // ✅ Sort by newest first
+    // Sort by newest first
     unique.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
     res.status(200).json(unique);
@@ -53,7 +96,7 @@ router.get('/student/:userId', async (req, res) => {
 
 
 // ─────────────────────────────────────────────
-// GET all announcements
+// GET all announcements (studio-side, no filter)
 // ─────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
@@ -106,7 +149,7 @@ router.post('/', async (req, res) => {
 
     const saved = await newAnnouncement.save();
 
-    // ✅ Forward the new announcement to DanceCount API
+    // Forward the new announcement to DanceCount API
     // so students enrolled in this batch receive it
     try {
       const dcResponse = await fetch(
