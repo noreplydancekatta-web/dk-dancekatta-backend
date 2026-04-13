@@ -3,8 +3,8 @@ const mongoose = require('mongoose');
 const AnnouncementSchema = new mongoose.Schema({
   title:     { type: String, required: true },
   message:   { type: String, required: true },
-  studioId:  { type: String, required: true }, // ✅ ADD
-  batchId:   { type: String, default: null },  // ✅ ADD
+  studioId:  { type: mongoose.Schema.Types.ObjectId, ref: 'Studio', required: true },
+  batchId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Batch', default: null },
   createdAt: { type: Date, default: Date.now }
 });
 

@@ -39,8 +39,8 @@ router.get('/student/:userId', async (req, res) => {
         if (!enrolledAt) return [];
 
         const announcements = await Announcement.find({
-          batchId: batchId,
-          studioId: batch.studioId?.toString(),
+          studioId: batch.studioId,
+          $or: [{ batchId: null }, { batchId: batch._id }],
           createdAt: { $gte: enrolledAt },
         }).sort({ createdAt: -1 }).lean();
 
