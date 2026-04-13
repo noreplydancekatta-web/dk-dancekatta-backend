@@ -15,7 +15,11 @@ router.get('/student/:userId', async (req, res) => {
     const user = await User.findById(req.params.userId)
                            .populate('enrolled_batches');
 
+    console.log('🔍 User found:', user?._id);
+    console.log('🔍 Enrolled batches:', user?.enrolled_batches?.length);
+
     if (!user || !user.enrolled_batches || user.enrolled_batches.length === 0) {
+      console.log('⚠️ No user or no enrolled batches');
       return res.status(200).json([]);
     }
 
@@ -26,14 +30,13 @@ router.get('/student/:userId', async (req, res) => {
       studentId: req.params.userId,   // ← correct field name from schema
     }).lean();
 
+    console.log('🔍 Transactions found:', transactions.length);
+
     // Build a map: batchId (string) → enrolledAt (Date)
-    // If no transaction found for a batch, fall back to epoch (show nothing old)
     const enrolledAtMap = {};
     for (const txn of transactions) {
       const batchId = txn.batchId?.toString();
       if (batchId) {
-        // transactionDate is the explicit enrollment date field;
-        // createdAt is the auto-timestamp fallback (both exist due to timestamps:true)
         const existing = enrolledAtMap[batchId];
         const txnDate = new Date(txn.transactionDate || txn.createdAt || 0);
         if (!existing || txnDate < existing) {
@@ -42,10 +45,16 @@ router.get('/student/:userId', async (req, res) => {
       }
     }
 
+    console.log('🔍 Enrollment map:', enrolledAtMap);
+
     const results = await Promise.allSettled(
       user.enrolled_batches.map(async (batch) => {
         const batchId = batch._id.toString();
         const enrolledAt = enrolledAtMap[batchId] || new Date(0);
+
+        console.log('🔍 Checking batch:', batchId);
+        console.log('🔍 Enrolled at:', enrolledAt);
+        console.log('🔍 Studio ID:', batch.studioId?.toString());
 
         const announcements = await Announcement.find({
           $or: [
@@ -58,6 +67,11 @@ router.get('/student/:userId', async (req, res) => {
         })
           .sort({ createdAt: -1 })
           .lean();
+
+        console.log('🔍 Announcements found for batch', batchId, ':', announcements.length);
+        if (announcements.length > 0) {
+          console.log('🔍 First announcement:', announcements[0]);
+        }
 
         return announcements.map(a => ({
           _id:       a._id,
@@ -86,6 +100,8 @@ router.get('/student/:userId', async (req, res) => {
 
     // Sort by newest first
     unique.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    console.log('✅ Total unique announcements:', unique.length);
 
     res.status(200).json(unique);
 
