@@ -56,6 +56,22 @@ router.get('/student/:userId', async (req, res) => {
         console.log('🔍 Enrolled at:', enrolledAt);
         console.log('🔍 Studio ID:', batch.studioId?.toString());
 
+        // First check all announcements for this batch without date filter
+        const allAnnouncementsForBatch = await Announcement.find({
+          $or: [
+            { batchId: batchId },
+            { batchId: batch._id },
+            { batchId: null }
+          ],
+          studioId: batch.studioId?.toString(),
+        }).lean();
+
+        console.log('🔍 Total announcements for batch (no date filter):', allAnnouncementsForBatch.length);
+        if (allAnnouncementsForBatch.length > 0) {
+          console.log('🔍 Sample announcement createdAt:', allAnnouncementsForBatch[0].createdAt);
+          console.log('🔍 Is announcement after enrollment?', new Date(allAnnouncementsForBatch[0].createdAt) >= enrolledAt);
+        }
+
         const announcements = await Announcement.find({
           $or: [
             { batchId: batchId },
