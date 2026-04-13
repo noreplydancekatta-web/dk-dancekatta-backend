@@ -15,24 +15,14 @@ router.get('/student/:userId', async (req, res) => {
     const user = await User.findById(req.params.userId)
                            .populate('enrolled_batches');
 
-    console.log('🔍 User found:', user?._id);
-    console.log('🔍 Enrolled batches:', user?.enrolled_batches?.length);
-
     if (!user || !user.enrolled_batches || user.enrolled_batches.length === 0) {
-      console.log('⚠️ No user or no enrolled batches');
       return res.status(200).json([]);
     }
 
-    // ✅ Fetch the transaction records for this user so we know WHEN they
-    //    enrolled in each batch.
-    //    Schema uses: studentId, transactionDate, and timestamps:true (createdAt)
     const transactions = await Transaction.find({
-      studentId: req.params.userId,   // ← correct field name from schema
+      studentId: req.params.userId,
     }).lean();
 
-    console.log('🔍 Transactions found:', transactions.length);
-
-    // Build a map: batchId (string) → enrolledAt (Date)
     const enrolledAtMap = {};
     for (const txn of transactions) {
       const batchId = txn.batchId?.toString();
@@ -45,39 +35,10 @@ router.get('/student/:userId', async (req, res) => {
       }
     }
 
-    console.log('🔍 Enrollment map:', enrolledAtMap);
-
     const results = await Promise.allSettled(
       user.enrolled_batches.map(async (batch) => {
         const batchId = batch._id.toString();
         const enrolledAt = enrolledAtMap[batchId] || new Date(0);
-
-        console.log('🔍 Checking batch:', batchId);
-        console.log('🔍 Enrolled at:', enrolledAt);
-        console.log('🔍 Studio ID:', batch.studioId?.toString());
-
-        // Check ALL announcements in DB
-        const allAnnouncements = await Announcement.find({}).lean();
-        console.log('🔍 Total announcements in DB:', allAnnouncements.length);
-        if (allAnnouncements.length > 0) {
-          console.log('🔍 Sample announcement:', JSON.stringify(allAnnouncements[0], null, 2));
-        }
-
-        // First check all announcements for this batch without date filter
-        const allAnnouncementsForBatch = await Announcement.find({
-          $or: [
-            { batchId: batchId },
-            { batchId: batch._id },
-            { batchId: null }
-          ],
-          studioId: batch.studioId?.toString(),
-        }).lean();
-
-        console.log('🔍 Total announcements for batch (no date filter):', allAnnouncementsForBatch.length);
-        if (allAnnouncementsForBatch.length > 0) {
-          console.log('🔍 Sample announcement createdAt:', allAnnouncementsForBatch[0].createdAt);
-          console.log('🔍 Is announcement after enrollment?', new Date(allAnnouncementsForBatch[0].createdAt) >= enrolledAt);
-        }
 
         const announcements = await Announcement.find({
           $or: [
@@ -91,11 +52,6 @@ router.get('/student/:userId', async (req, res) => {
           .sort({ createdAt: -1 })
           .lean();
 
-        console.log('🔍 Announcements found for batch', batchId, ':', announcements.length);
-        if (announcements.length > 0) {
-          console.log('🔍 First announcement:', announcements[0]);
-        }
-
         return announcements.map(a => ({
           _id:       a._id,
           title:     a.title   || 'No Title',
@@ -107,12 +63,10 @@ router.get('/student/:userId', async (req, res) => {
       })
     );
 
-    // Collect successful results, skip failed ones
     const allAnnouncements = results
       .filter(r => r.status === 'fulfilled')
       .flatMap(r => r.value);
 
-    // Deduplicate by _id (in case a general announcement targets multiple batches)
     const seen = new Set();
     const unique = allAnnouncements.filter(a => {
       const key = a._id.toString();
@@ -121,10 +75,7 @@ router.get('/student/:userId', async (req, res) => {
       return true;
     });
 
-    // Sort by newest first
     unique.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    console.log('✅ Total unique announcements:', unique.length);
 
     res.status(200).json(unique);
 
