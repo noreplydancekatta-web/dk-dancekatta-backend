@@ -42,18 +42,19 @@ router.get('/student/:userId', async (req, res) => {
       }
     }
 
-    // ✅ For each enrolled batch, fetch only announcements created ON OR AFTER
-    //    the enrollment date, filtering old pre-enrollment messages out.
     const results = await Promise.allSettled(
       user.enrolled_batches.map(async (batch) => {
         const batchId = batch._id.toString();
-        const enrolledAt = enrolledAtMap[batchId] || new Date(0); // epoch fallback
+        const enrolledAt = enrolledAtMap[batchId] || new Date(0);
 
-        // Query directly from DB (same server) instead of an internal HTTP call
         const announcements = await Announcement.find({
-          batchId: batchId,
+          $or: [
+            { batchId: batchId },
+            { batchId: batch._id },
+            { batchId: null }
+          ],
           studioId: batch.studioId?.toString(),
-          createdAt: { $gte: enrolledAt }, // ✅ THE CORE FIX
+          createdAt: { $gte: enrolledAt },
         })
           .sort({ createdAt: -1 })
           .lean();
