@@ -12,24 +12,20 @@ const mongoose = require('mongoose');
 // ─────────────────────────────────────────────
 router.get('/student/:userId', async (req, res) => {
   try {
-    const user = await User.findById(req.params.userId)
-                           .populate('enrolled_batches');
+    const user = await User.findById(req.params.userId).populate('enrolled_batches');
 
     if (!user || !user.enrolled_batches || user.enrolled_batches.length === 0) {
       return res.status(200).json([]);
     }
 
-    const transactions = await Transaction.find({
-      studentId: req.params.userId,
-    }).lean();
+    const transactions = await Transaction.find({ studentId: req.params.userId }).lean();
 
     const enrolledAtMap = {};
     for (const txn of transactions) {
       const batchId = txn.batchId?.toString();
       if (batchId) {
-        const existing = enrolledAtMap[batchId];
         const txnDate = new Date(txn.createdAt || 0);
-        if (!existing || txnDate < existing) {
+        if (!enrolledAtMap[batchId] || txnDate < enrolledAtMap[batchId]) {
           enrolledAtMap[batchId] = txnDate;
         }
       }
@@ -38,26 +34,22 @@ router.get('/student/:userId', async (req, res) => {
     const results = await Promise.allSettled(
       user.enrolled_batches.map(async (batch) => {
         const batchId = batch._id.toString();
-        const enrolledAt = enrolledAtMap[batchId] || new Date(0);
+        const enrolledAt = enrolledAtMap[batchId];
+
+        if (!enrolledAt) return [];
 
         const announcements = await Announcement.find({
-          $or: [
-            { batchId: batchId },
-            { batchId: batch._id },
-            { batchId: null }
-          ],
+          batchId: batchId,
           studioId: batch.studioId?.toString(),
           createdAt: { $gte: enrolledAt },
-        })
-          .sort({ createdAt: -1 })
-          .lean();
+        }).sort({ createdAt: -1 }).lean();
 
         return announcements.map(a => ({
-          _id:       a._id,
-          title:     a.title   || 'No Title',
-          message:   a.message || 'No Message',
-          studioId:  a.studioId,
-          batchId:   a.batchId,
+          _id: a._id,
+          title: a.title || 'No Title',
+          message: a.message || 'No Message',
+          studioId: a.studioId,
+          batchId: a.batchId,
           createdAt: a.createdAt,
         }));
       })
