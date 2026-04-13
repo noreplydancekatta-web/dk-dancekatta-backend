@@ -38,7 +38,7 @@ router.get('/student/:userId', async (req, res) => {
       const batchId = txn.batchId?.toString();
       if (batchId) {
         const existing = enrolledAtMap[batchId];
-        const txnDate = new Date(txn.transactionDate || txn.createdAt || 0);
+        const txnDate = new Date(txn.createdAt || 0);
         if (!existing || txnDate < existing) {
           enrolledAtMap[batchId] = txnDate;
         }
