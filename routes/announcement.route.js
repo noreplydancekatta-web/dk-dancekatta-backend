@@ -56,6 +56,13 @@ router.get('/student/:userId', async (req, res) => {
         console.log('🔍 Enrolled at:', enrolledAt);
         console.log('🔍 Studio ID:', batch.studioId?.toString());
 
+        // Check ALL announcements in DB
+        const allAnnouncements = await Announcement.find({}).lean();
+        console.log('🔍 Total announcements in DB:', allAnnouncements.length);
+        if (allAnnouncements.length > 0) {
+          console.log('🔍 Sample announcement:', JSON.stringify(allAnnouncements[0], null, 2));
+        }
+
         // First check all announcements for this batch without date filter
         const allAnnouncementsForBatch = await Announcement.find({
           $or: [
