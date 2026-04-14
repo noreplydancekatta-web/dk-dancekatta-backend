@@ -8,23 +8,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-/**
- * Send enrollment confirmation email to a student.
- *
- * @param {Object} params
- * @param {string} params.studentEmail
- * @param {string} params.studentName
- * @param {string} params.batchName
- * @param {string} params.studioName
- * @param {string} params.styleName      - e.g. "Salsa"
- * @param {string} params.levelName      - e.g. "Beginner"
- * @param {string} params.fromDate
- * @param {string} params.toDate
- * @param {number} params.amountPaid
- * @param {string} params.paymentId      - Razorpay / internal transaction ID
- * @param {string} params.paymentMethod
- */
-async function sendEnrollmentEmail({
+const sendEnrollmentEmail = async ({
   studentEmail,
   studentName,
   batchName,
@@ -36,8 +20,13 @@ async function sendEnrollmentEmail({
   amountPaid,
   paymentId,
   paymentMethod,
-}) {
+}) => {
   try {
+    if (!studentEmail || !studentEmail.includes("@")) {
+      console.log("Invalid email format:", studentEmail);
+      return false;
+    }
+
     const formattedFrom = fromDate
       ? new Date(fromDate).toLocaleDateString("en-IN", {
           day: "2-digit",
@@ -55,8 +44,8 @@ async function sendEnrollmentEmail({
       : "N/A";
 
     const mailOptions = {
-      from: `"DanceKatta" <${process.env.EMAIL_USER}>`,
-      to: studentEmail,
+      from: `"Dance Katta" <${process.env.EMAIL_USER}>`,
+      to: studentEmail.trim().toLowerCase(),
       subject: `🎉 Enrollment Confirmed – ${batchName} at ${studioName}`,
       html: `
         <!DOCTYPE html>
@@ -82,7 +71,7 @@ async function sendEnrollmentEmail({
         <body>
           <div class="container">
             <div class="header">
-              <h1>💃 DanceKatta</h1>
+              <h1>💃 Dance Katta</h1>
               <p>Enrollment Confirmation</p>
             </div>
             <div class="body">
@@ -101,12 +90,11 @@ async function sendEnrollmentEmail({
               </table>
 
               <p><span class="badge">✅ Payment Successful</span></p>
-
               <p style="margin-top: 24px;">See you on the dance floor! 🕺</p>
-              <p>– The DanceKatta Team</p>
+              <p>– The Dance Katta Team</p>
             </div>
             <div class="footer">
-              &copy; ${new Date().getFullYear()} DanceKatta. All rights reserved.
+              &copy; ${new Date().getFullYear()} Dance Katta. All rights reserved.
             </div>
           </div>
         </body>
@@ -115,12 +103,12 @@ async function sendEnrollmentEmail({
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`✅ Enrollment email sent to ${studentEmail}`);
+    console.log("Enrollment email sent successfully to:", studentEmail);
     return true;
-  } catch (err) {
-    console.error("❌ Enrollment email failed:", err.message);
+  } catch (error) {
+    console.error("Enrollment email sending failed:", error);
     return false;
   }
-}
+};
 
 module.exports = { sendEnrollmentEmail };

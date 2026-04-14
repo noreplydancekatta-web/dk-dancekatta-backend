@@ -10,7 +10,7 @@ const Level = require('../models/Level');
 const PlatformFee = require("../models/platformFee");
 const User = require("../models/User");
 const Coupon = require("../models/couponModel");
-const { sendEnrollmentEmail } = require("../utils/enrollmentEmailService"); // ✅ NEW
+const { sendEnrollmentEmail } = require("../utils/enrollmentEmailService");
 
 // ✅ GET enrolled batches for a user with style & level names
 router.get('/enrolled/:studentId', async (req, res) => {
@@ -108,10 +108,8 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "Invalid studentId or batchId" });
     }
 
-    const batch = await Batch.findById(batchId)
-      .populate('style', 'name')
-      .populate('level', 'name')
-      .populate('studioId', 'studioName');
+    // ✅ Fetch batch WITHOUT populate first (for save operations)
+    const batch = await Batch.findById(batchId);
     if (!batch) return res.status(404).json({ message: "Batch not found" });
 
     const user = await User.findById(studentId);
@@ -164,22 +162,31 @@ router.post("/", async (req, res) => {
     });
     await txn.save();
 
-    // ✅ Send enrollment confirmation email (non-blocking)
-    if (user.email) {
-      sendEnrollmentEmail({
-        studentEmail: user.email,
-        studentName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
-        batchName: batch.batchName,
-        studioName: batch.studioId?.studioName || 'DanceKatta Studio',
-        styleName: batch.style?.name || '',
-        levelName: batch.level?.name || '',
-        fromDate: batch.fromDate,
-        toDate: batch.toDate,
-        amountPaid: paymentDetails.amountPaid,
-        paymentId: paymentDetails.transactionId,
-        paymentMethod: paymentDetails.paymentMethod,
-      }).catch(err => console.error("Enrollment email failed:", err.message));
-    }
+    // ✅ Fetch FRESH populated batch AFTER all saves — avoids populate being wiped
+    const batchForEmail = await Batch.findById(batchId)
+      .populate('style', 'name')
+      .populate('level', 'name')
+      .populate('studioId', 'studioName');
+
+    console.log("📧 Sending enrollment email to:", user.email);
+    console.log("📦 Batch for email:", batchForEmail?.batchName, "| Style:", batchForEmail?.style?.name, "| Studio:", batchForEmail?.studioId?.studioName);
+
+    // ✅ Send email — await it so errors are visible in logs
+    const emailSent = await sendEnrollmentEmail({
+      studentEmail: user.email,
+      studentName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+      batchName: batchForEmail.batchName,
+      studioName: batchForEmail.studioId?.studioName || 'Dance Katta Studio',
+      styleName: batchForEmail.style?.name || '',
+      levelName: batchForEmail.level?.name || '',
+      fromDate: batchForEmail.fromDate,
+      toDate: batchForEmail.toDate,
+      amountPaid: paymentDetails.amountPaid,
+      paymentId: paymentDetails.transactionId,
+      paymentMethod: paymentDetails.paymentMethod,
+    });
+
+    console.log("📧 Email sent?", emailSent);
 
     // --- Return updated batch with enrolled students ---
     const updatedBatch = await Batch.findById(batch._id)
