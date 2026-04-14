@@ -10,6 +10,7 @@ const Level = require('../models/Level');
 const PlatformFee = require("../models/platformFee");
 const User = require("../models/User");
 const Coupon = require("../models/couponModel");
+const { sendEnrollmentEmail } = require("../utils/enrollmentEmailService"); // ✅ NEW
 
 // ✅ GET enrolled batches for a user with style & level names
 router.get('/enrolled/:studentId', async (req, res) => {
@@ -65,8 +66,8 @@ router.get('/enrolled/:studentId', async (req, res) => {
         batchId: batch._id,
         platformFeePercent: txn.platformFeePercent,
         gstPercent: txn.gstPercent,
-        discountPercent: txn.discountPercent || 0,   // ✅ added
-        discountAmount: txn.discountAmount || 0,     // ✅ added
+        discountPercent: txn.discountPercent || 0,
+        discountAmount: txn.discountAmount || 0,
         paymentAmount: txn.paymentDetails.amountPaid,
         paymentDate: txn.paymentDetails.paymentDate,
         paymentMethod: txn.paymentDetails.paymentMethod,
@@ -97,6 +98,7 @@ router.get("/platformfee/latest", async (req, res) => {
   }
 });
 
+// ✅ POST / — Create transaction + enroll student + send email
 router.post("/", async (req, res) => {
   try {
     const { studentId, batchId, couponCode, paymentDetails } = req.body;
@@ -106,7 +108,10 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "Invalid studentId or batchId" });
     }
 
-    const batch = await Batch.findById(batchId);
+    const batch = await Batch.findById(batchId)
+      .populate('style', 'name')
+      .populate('level', 'name')
+      .populate('studioId', 'studioName');
     if (!batch) return res.status(404).json({ message: "Batch not found" });
 
     const user = await User.findById(studentId);
@@ -159,6 +164,23 @@ router.post("/", async (req, res) => {
     });
     await txn.save();
 
+    // ✅ Send enrollment confirmation email (non-blocking)
+    if (user.email) {
+      sendEnrollmentEmail({
+        studentEmail: user.email,
+        studentName: `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+        batchName: batch.batchName,
+        studioName: batch.studioId?.studioName || 'DanceKatta Studio',
+        styleName: batch.style?.name || '',
+        levelName: batch.level?.name || '',
+        fromDate: batch.fromDate,
+        toDate: batch.toDate,
+        amountPaid: paymentDetails.amountPaid,
+        paymentId: paymentDetails.transactionId,
+        paymentMethod: paymentDetails.paymentMethod,
+      }).catch(err => console.error("Enrollment email failed:", err.message));
+    }
+
     // --- Return updated batch with enrolled students ---
     const updatedBatch = await Batch.findById(batch._id)
       .populate('enrolled_students', 'firstName lastName email mobile');
@@ -174,5 +196,4 @@ router.post("/", async (req, res) => {
   }
 });
 
-
-    module.exports = router;
+module.exports = router;
